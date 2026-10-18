@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>五子棋</title>
+  <style>
+    :root {
+      --wood: #d6b17a;
+      --line: #6b4f2a;
+      --ink: #1a130c;
+      --paper: #f4e6c8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background:
+        radial-gradient(circle at top, #3d2a18, #1c120a);
+      color: var(--paper);
+      font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      letter-spacing: 8px;
+      font-weight: 700;
+    }
+
+    .hud {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 18px;
+    }
+
+    .turn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stone-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+
+    .stone-icon.black { background: radial-gradient(circle at 35% 30%, #555, #111); }
+    .stone-icon.white { background: radial-gradient(circle at 35% 30%, #fff, #cfcfcf); }
+
+    .board-wrap {
+      position: relative;
+      padding: 18px;
+      background: linear-gradient(145deg, #e8c48a, #c99a55);
+      border-radius: 8px;
+      box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.45),
+        inset 0 0 0 4px #8a6230;
+    }
+
+    canvas {
+      display: block;
+      width: min(92vw, 520px);
+      height: auto;
+      aspect-ratio: 1;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 18px;
+      display: none;
+      place-items: center;
+      background: rgba(26, 19, 12, 0.55);
+      color: #fff8e8;
+      text-align: center;
+      font-size: 24px;
+      letter-spacing: 2px;
+    }
+
+    button {
+      font-family: inherit;
+      padding: 8px 18px;
+      border: 0;
+      border-radius: 6px;
+      background: #2a1c10;
+      color: var(--paper);
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    button:hover { background: #3d2918; }
+
+    .hint {
+      margin: 0;
+      opacity: 0.7;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <h1>五子棋</h1>
+  <div class="hud">
+    <div class="turn">当前：<span class="stone-icon" id="turn-icon"></span><strong id="turn-text">黑棋</strong></div>
+    <button id="restart" type="button">重开</button>
+  </div>
+  <div class="board-wrap">
+    <canvas id="board" width="600" height="600"></canvas>
+    <div class="overlay" id="overlay">
+      <div>
+        <div id="overlay-text">黑棋胜</div>
+        <button id="again" type="button" style="margin-top:12px">再来一局</button>
+      </div>
+    </div>
+  </div>
+  <p class="hint">黑棋先手 · 点击交叉点落子 · 五子连珠获胜</p>
+
+  <script>
+    const SIZE = 15;
+    const PAD = 28;
+    const canvas = document.getElementById("board");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const overlayText = document.getElementById("overlay-text");
+    const turnIcon = document.getElementById("turn-icon");
+    const turnText = document.getElementById("turn-text");
+
+    const CELL = (canvas.width - PAD * 2) / (SIZE - 1);
+
+    let grid, current, over, lastMove;
+
+    function reset() {
+      grid = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+      current = 1;
+      over = false;
+      lastMove = null;
+      overlay.style.display = "none";
+      updateTurn();
+      draw();
+    }
+
+    function updateTurn() {
+      const black = current === 1;
+      turnIcon.className = "stone-icon " + (black ? "black" : "white");
+      turnText.textContent = black ? "黑棋" : "白棋";
+    }
+
+    function draw() {
+      ctx.fillStyle = "#d6b17a";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = "#6b4f2a";
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < SIZE; i++) {
+        const p = PAD + i * CELL;
+        ctx.beginPath();
+        ctx.moveTo(PAD, p);
+        ctx.lineTo(canvas.width - PAD, p);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p, PAD);
+        ctx.lineTo(p, canvas.height - PAD);
+        ctx.stroke();
+      }
+
+      const stars = [
+        [3, 3], [3, 11], [11, 3], [11, 11], [7, 7],
+      ];
+      ctx.fillStyle = "#4a3318";
+      for (const [x, y] of stars) {
+        ctx.beginPath();
+        ctx.arc(PAD + x * CELL, PAD + y * CELL, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      for (let y = 0; y < SIZE; y++) {
+        for (let x = 0; x < SIZE; x++) {
+          if (grid[y][x]) drawStone(x, y, grid[y][x]);
+        }
+      }
+
+      if (lastMove) {
+        ctx.strokeStyle = lastMove.color === 1 ? "#fff" : "#111";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(
+          PAD + lastMove.x * CELL,
+          PAD + lastMove.y * CELL,
+          CELL * 0.22,
+          0,
+          Math.PI * 2
+        );
+        ctx.stroke();
+      }
+    }
+
+    function drawStone(x, y, color) {
+      const cx = PAD + x * CELL;
+      const cy = PAD + y * CELL;
+      const r = CELL * 0.42;
+      const grd = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.15, cx, cy, r);
+      if (color === 1) {
+        grd.addColorStop(0, "#5a5a5a");
+        grd.addColorStop(1, "#111");
+      } else {
+        grd.addColorStop(0, "#ffffff");
+        grd.addColorStop(1, "#c8c8c8");
+      }
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function posFromEvent(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+      const x = Math.round((px - PAD) / CELL);
+      const y = Math.round((py - PAD) / CELL);
+      if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return null;
+      return { x, y };
+    }
+
+    function countDir(x, y, dx, dy, color) {
+      let n = 0;
+      let i = x + dx;
+      let j = y + dy;
+      while (i >= 0 && j >= 0 && i < SIZE && j < SIZE && grid[j][i] === color) {
+        n++;
+        i += dx;
+        j += dy;
+      }
+      return n;
+    }
+
+    function isWin(x, y, color) {
+      const dirs = [
+        [1, 0],
+        [0, 1],
+        [1, 1],
+        [1, -1],
+      ];
+      return dirs.some(([dx, dy]) => {
+        const total = 1 + countDir(x, y, dx, dy, color) + countDir(x, y, -dx, -dy, color);
+        return total >= 5;
+      });
+    }
+
+    function place(x, y) {
+      if (over || grid[y][x]) return;
+      grid[y][x] = current;
+      lastMove = { x, y, color: current };
+      if (isWin(x, y, current)) {
+        over = true;
+        overlayText.textContent = current === 1 ? "黑棋胜" : "白棋胜";
+        overlay.style.display = "grid";
+      } else if (grid.every((row) => row.every((cell) => cell))) {
+        over = true;
+        overlayText.textContent = "和棋";
+        overlay.style.display = "grid";
+      } else {
+        current = current === 1 ? 2 : 1;
+        updateTurn();
+      }
+      draw();
+    }
+
+    canvas.addEventListener("click", (e) => {
+      const pos = posFromEvent(e);
+      if (pos) place(pos.x, pos.y);
+    });
+
+    document.getElementById("restart").addEventListener("click", reset);
+    document.getElementById("again").addEventListener("click", reset);
+
+    reset();
+  </script>
+</body>
+</html>
